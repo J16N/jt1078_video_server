@@ -32,7 +32,7 @@ impl RtpProcessor {
     pub async fn listen(&mut self, mut channel: Receiver<RtpPacket>) {
         while let Some(packet) = channel.recv().await {
             if let Err(e) = self.process(packet).await {
-                eprintln!("Failed to process packet: {e}");
+                eprintln!("Failed to process packet ({}): {e}", self.imei);
                 break;
             }
         }
@@ -111,6 +111,7 @@ impl RtpProcessor {
         let arguments: Vec<&str> = arguments.split(' ').collect();
         let child = Command::new("ffmpeg").args(&arguments).spawn()?;
         self.ffmpeg_process = Some(child);
+        // Wait for ffmpeg to start
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
         Ok(())
