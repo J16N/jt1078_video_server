@@ -101,7 +101,7 @@ impl RtpProcessor {
 
     async fn init_ffmpeg_process(&mut self) -> Result<()> {
         let arguments = format!(
-            "-re -f h264 -i tcp://{}\\?listen -c copy -strftime 1 \
+            "-hide_banner -loglevel error -re -f h264 -i tcp://{}\\?listen -c copy -strftime 1 \
             -hls_time 5 -hls_segment_filename {}/streams/%Y-%m-%d_%H-%M-%S.ts \
             -hls_list_size 5 -hls_flags delete_segments -f hls {}/playlist.m3u8",
             self.address, self.imei, self.imei
