@@ -70,10 +70,7 @@ impl RtpProcessor {
                 match client.connect().await {
                     Ok(_) => (),
                     Err(e) => {
-                        eprintln!(
-                            "Failed to connect to client ({} - {}): {e}",
-                            client.address, imei
-                        );
+                        eprintln!("Client connection failed ({imei}): {}", client.address);
                         return Err(e);
                     }
                 };
