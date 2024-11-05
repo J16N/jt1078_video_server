@@ -47,8 +47,11 @@ impl RtpProcessor {
         }
 
         if let Some(mut process) = self.ffmpeg_process.take() {
-            if let Err(e) = process.kill().await {
-                eprintln!("Failed to kill ffmpeg process ({}): {e}", self.imei);
+            // if let Err(e) = process.kill().await {
+            //     eprintln!("Failed to kill ffmpeg process ({}): {e}", self.imei);
+            // }
+            if let Err(e) = process.wait().await {
+                eprintln!("Failed to wait for ffmpeg process ({}): {e}", self.imei);
             }
         }
 
@@ -102,9 +105,9 @@ impl RtpProcessor {
     async fn init_ffmpeg_process(&mut self) -> Result<()> {
         let arguments = format!(
             "-hide_banner -loglevel error -re -f h264 -i tcp://{}\\?listen \
-            -c copy -preset:v fast -lhls true -strftime 1 -hls_init_time 1 -hls_time 6 -hls_segment_filename \
-            {}/streams/%Y-%m-%d_%H-%M-%S.ts -hls_list_size 10 -hls_flags \
-            delete_segments -f hls {}/playlist.m3u8",
+            -c copy -preset:v fast -lhls true -strftime 1 -hls_init_time 1 \
+            -hls_time 6 -hls_segment_filename {}/streams/%Y-%m-%d_%H-%M-%S.ts \
+            -hls_list_size 10 -hls_flags delete_segments -f hls {}/playlist.m3u8",
             self.address, self.imei, self.imei
         );
 
