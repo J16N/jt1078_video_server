@@ -147,6 +147,7 @@ impl RtpProcessor {
             };
         });
         self.ffmpeg_process = Some(handle);
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
         Ok(())
     }
