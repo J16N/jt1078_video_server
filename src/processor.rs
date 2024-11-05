@@ -4,7 +4,7 @@ use crate::Result;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tokio::fs;
-use tokio::net::{TcpListener, TcpSocket};
+use tokio::net::TcpSocket;
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc::Receiver;
 
@@ -32,7 +32,7 @@ impl RtpProcessor {
     pub async fn listen(&mut self, mut channel: Receiver<RtpPacket>) {
         while let Some(packet) = channel.recv().await {
             if let Err(e) = self.process(packet).await {
-                eprintln!("Failed to process packet: {e}");
+                eprintln!("Failed to process packet ({}): {e}", self.imei);
                 break;
             }
         }
@@ -67,7 +67,16 @@ impl RtpProcessor {
             self.init_ffmpeg_process().await?;
 
             if let Some(client) = &mut self.client {
-                client.connect().await?;
+                match client.connect().await {
+                    Ok(_) => (),
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to connect to client ({} - {}): {e}",
+                            client.address, imei
+                        );
+                        return Err(e);
+                    }
+                };
             }
         }
 
