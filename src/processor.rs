@@ -5,19 +5,24 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::net::TcpSocket;
-use tokio::process::{Child, Command};
-use tokio::sync::mpsc::Receiver;
+use tokio::process::Command;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::task::JoinHandle;
 
 pub(crate) struct RtpProcessor {
     address: SocketAddr,
     client: Option<TcpClient>,
     dir_init: bool,
-    ffmpeg_process: Option<Child>,
+    ffmpeg_process: Option<JoinHandle<()>>,
     imei: String,
+    rx: Option<Receiver<()>>,
+    tx: Option<Sender<()>>,
 }
 
 impl RtpProcessor {
     pub fn new() -> Self {
+        let (tx, rx) = channel::<()>();
         let address = "127.0.0.1:0".parse().expect("Failed to parse address");
 
         Self {
@@ -26,10 +31,12 @@ impl RtpProcessor {
             dir_init: false,
             ffmpeg_process: None,
             imei: String::new(),
+            rx: Some(rx),
+            tx: Some(tx),
         }
     }
 
-    pub async fn listen(&mut self, mut channel: Receiver<RtpPacket>) {
+    pub async fn listen(&mut self, mut channel: mpsc::Receiver<RtpPacket>) {
         while let Some(packet) = channel.recv().await {
             if let Err(e) = self.process(packet).await {
                 eprintln!("Failed to process packet ({}): {e}", self.imei);
@@ -46,9 +53,19 @@ impl RtpProcessor {
             }
         }
 
-        if let Some(mut process) = self.ffmpeg_process.take() {
-            if let Err(e) = process.kill().await {
-                eprintln!("Failed to kill ffmpeg process ({}): {e}", self.imei);
+        if let Some(handle) = self.ffmpeg_process.take() {
+            let tx = self.tx.take().expect("Transmitter not found");
+
+            match tx.send(()) {
+                Ok(_) => {
+                    if let Err(e) = handle.await {
+                        eprintln!("Failed to wait for ffmpeg process ({}): {e}", self.imei);
+                    }
+                }
+
+                Err(_) => {
+                    handle.abort();
+                }
             }
         }
 
@@ -116,8 +133,20 @@ impl RtpProcessor {
         println!("ffmpeg {arguments}");
 
         let arguments: Vec<&str> = arguments.split(' ').collect();
-        let child = Command::new("ffmpeg").args(&arguments).spawn()?;
-        self.ffmpeg_process = Some(child);
+        let mut child = Command::new("ffmpeg").args(&arguments).spawn()?;
+        let rx = self.rx.take().expect("Receiver not found");
+
+        let handle = tokio::spawn(async move {
+            tokio::select! {
+                _ = child.wait() => (),
+                _ = rx => {
+                    if let Err(e) = child.kill().await {
+                        eprintln!("Failed to kill ffmpeg process: {e}");
+                    }
+                }
+            };
+        });
+        self.ffmpeg_process = Some(handle);
 
         Ok(())
     }
