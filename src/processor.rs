@@ -130,8 +130,6 @@ impl RtpProcessor {
             self.address, self.imei, self.imei
         );
 
-        println!("ffmpeg {arguments}");
-
         let arguments: Vec<&str> = arguments.split(' ').collect();
         let mut child = Command::new("ffmpeg").args(&arguments).spawn()?;
         let rx = self.rx.take().expect("Receiver not found");
@@ -147,7 +145,7 @@ impl RtpProcessor {
             };
         });
         self.ffmpeg_process = Some(handle);
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
         Ok(())
     }
