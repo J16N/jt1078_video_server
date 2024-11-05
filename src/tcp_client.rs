@@ -1,7 +1,7 @@
 use crate::Result;
 use std::net::SocketAddr;
 use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::net::TcpStream;
+use tokio::net::{TcpSocket, TcpStream};
 
 pub(crate) struct TcpClient {
     pub(crate) address: SocketAddr,
@@ -18,7 +18,9 @@ impl TcpClient {
 
     pub(crate) async fn connect(&mut self) -> Result<()> {
         if self.stream.is_none() {
-            let stream = TcpStream::connect(self.address).await?;
+            let socket = TcpSocket::new_v4()?;
+            socket.set_reuseaddr(true)?;
+            let stream = socket.connect(self.address).await?;
             self.stream = Some(BufWriter::new(stream));
         }
         Ok(())
