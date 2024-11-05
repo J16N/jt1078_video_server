@@ -107,6 +107,8 @@ impl RtpProcessor {
             self.address, self.imei, self.imei
         );
 
+        println!("ffmpeg {arguments}");
+
         let arguments: Vec<&str> = arguments.split(' ').collect();
         let child = Command::new("ffmpeg").args(&arguments).spawn()?;
         self.ffmpeg_process = Some(child);
