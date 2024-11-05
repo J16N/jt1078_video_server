@@ -4,7 +4,7 @@ use crate::Result;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tokio::fs;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpSocket};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc::Receiver;
 
@@ -79,10 +79,10 @@ impl RtpProcessor {
     }
 
     async fn init_address(&mut self) -> Result<()> {
-        let listener = TcpListener::bind(self.address)
-            .await
-            .expect("Failed to bind listener");
-        let address = listener.local_addr()?;
+        let socket = TcpSocket::new_v4()?;
+        socket.set_reuseaddr(true)?;
+        socket.bind(self.address)?;
+        let address = socket.local_addr()?;
         self.address = address;
         Ok(())
     }
