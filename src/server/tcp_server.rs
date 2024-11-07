@@ -3,7 +3,7 @@ use crate::rtp::RtpPacket;
 use std::net::SocketAddr;
 use tokio::io::BufReader;
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
 pub struct TcpServer {
@@ -50,11 +50,14 @@ impl TcpServer {
         socket
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(mut self, mut rx: broadcast::Receiver<()>) {
         println!("TCP Server listening on {}", self.address);
 
         let listener = self.listener.take().expect("Listener not found");
-        self.listen(listener).await;
+        tokio::select! {
+            _ = self.listen(listener) => (),
+            _ = rx.recv() => self.close().await,
+        }
     }
 
     async fn listen(&mut self, listener: TcpListener) {
