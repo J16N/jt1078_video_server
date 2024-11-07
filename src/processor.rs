@@ -1,16 +1,16 @@
 use crate::rtp::RtpPacket;
-use crate::tcp_client::TcpClient;
 use crate::Result;
-use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::time::Duration;
 use tokio::fs;
-use tokio::net::TcpListener;
-use tokio::process::{Child, Command};
+use tokio::io::AsyncWriteExt;
+use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc::Receiver;
+use tokio::time::timeout;
 
 pub(crate) struct RtpProcessor {
-    address: SocketAddr,
-    client: Option<TcpClient>,
+    child_stdin: Option<ChildStdin>,
     dir_init: bool,
     ffmpeg_process: Option<Child>,
     imei: String,
@@ -18,11 +18,8 @@ pub(crate) struct RtpProcessor {
 
 impl RtpProcessor {
     pub fn new() -> Self {
-        let address = "127.0.0.1:0".parse().expect("Failed to parse address");
-
         Self {
-            address,
-            client: None,
+            child_stdin: None,
             dir_init: false,
             ffmpeg_process: None,
             imei: String::new(),
@@ -37,12 +34,9 @@ impl RtpProcessor {
             }
         }
 
-        if let Some(mut client) = self.client.take() {
-            if let Err(e) = client.close().await {
-                eprintln!(
-                    "Failed to close client ({} - {}): {e}",
-                    client.address, self.imei
-                );
+        if let Some(mut stdin) = self.child_stdin.take() {
+            if let Err(e) = stdin.shutdown().await {
+                eprintln!("Failed to shutdown ffmpeg stdin ({}): {e}", self.imei);
             }
         }
 
@@ -50,8 +44,9 @@ impl RtpProcessor {
             // if let Err(e) = process.kill().await {
             //     eprintln!("Failed to kill ffmpeg process ({}): {e}", self.imei);
             // }
-            if let Err(e) = process.wait().await {
+            if let Err(e) = timeout(Duration::from_secs(10), process.wait()).await {
                 eprintln!("Failed to wait for ffmpeg process ({}): {e}", self.imei);
+                let _ = process.kill().await;
             }
         }
 
@@ -65,34 +60,15 @@ impl RtpProcessor {
             let imei = &packet.header.terminal_serial_number;
             self.imei.push_str(imei);
             self.init_dir(imei).await?;
-            self.init_address().await?;
-            self.init_client();
             self.init_ffmpeg_process().await?;
-
-            if let Some(client) = &mut self.client {
-                client.connect().await?;
-            }
         }
 
-        if let Some(client) = &mut self.client {
-            client.send(&packet.payload).await?;
+        if let Some(stdin) = &mut self.child_stdin {
+            stdin.write_all(&packet.payload).await?;
+            stdin.flush().await?;
         }
 
         Ok(())
-    }
-
-    async fn init_address(&mut self) -> Result<()> {
-        let listener = TcpListener::bind(self.address)
-            .await
-            .expect("Failed to bind listener");
-        let address = listener.local_addr()?;
-        self.address = address;
-        Ok(())
-    }
-
-    fn init_client(&mut self) {
-        let client = TcpClient::new(self.address);
-        self.client = Some(client);
     }
 
     async fn init_dir(&mut self, name: &str) -> Result<()> {
@@ -104,25 +80,30 @@ impl RtpProcessor {
 
     async fn init_ffmpeg_process(&mut self) -> Result<()> {
         let arguments = format!(
-            "-hide_banner -loglevel error -re -f h264 -i tcp://{}\\?listen \
-            -c copy -preset:v fast -lhls true -strftime 1 -hls_init_time 1 \
+            "-hide_banner -loglevel error -re -f h264 -i pipe: \
+            -c copy -preset:v fast -strftime 1 -hls_init_time 1 \
             -hls_time 6 -hls_segment_filename {}/streams/%Y-%m-%d_%H-%M-%S.ts \
             -hls_list_size 10 -hls_flags delete_segments -f hls {}/playlist.m3u8",
-            self.address, self.imei, self.imei
+            self.imei, self.imei
         );
 
         let arguments: Vec<&str> = arguments.split(' ').collect();
-        let child = Command::new("ffmpeg").args(&arguments).spawn()?;
+        let mut child = Command::new("ffmpeg")
+            .stdin(Stdio::piped())
+            .args(&arguments)
+            .spawn()?;
+        let stdin = child.stdin.take().ok_or(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "Failed to open stdin.",
+        ))?;
         self.ffmpeg_process = Some(child);
-        // Wait for ffmpeg to start
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        self.child_stdin = Some(stdin);
 
         Ok(())
     }
 
     async fn clean_up(&mut self) -> Result<()> {
-        let root = PathBuf::from(&self.imei);
-        fs::remove_dir_all(root).await?;
+        fs::remove_dir_all(&self.imei).await?;
         Ok(())
     }
 }
