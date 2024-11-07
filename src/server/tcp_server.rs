@@ -4,9 +4,11 @@ use std::net::SocketAddr;
 use tokio::io::BufReader;
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 pub struct TcpServer {
     address: SocketAddr,
+    handles: Vec<JoinHandle<()>>,
     listener: Option<TcpListener>,
 }
 
@@ -27,6 +29,7 @@ impl TcpServer {
 
         Self {
             address,
+            handles: Vec::new(),
             listener: Some(listener),
         }
     }
@@ -54,14 +57,14 @@ impl TcpServer {
         self.listen(listener).await;
     }
 
-    async fn listen(&self, listener: TcpListener) {
+    async fn listen(&mut self, listener: TcpListener) {
         while let Ok((stream, peer)) = listener.accept().await {
             println!("Incoming connection from: {peer}");
             let (tx, rx) = mpsc::channel::<RtpPacket>(100);
             let mut processor = RtpProcessor::new();
-            tokio::spawn(async move {
+            self.handles.push(tokio::spawn(async move {
                 processor.listen(rx).await;
-            });
+            }));
             tokio::spawn(Self::handle_connection(stream, tx));
         }
     }
@@ -86,6 +89,14 @@ impl TcpServer {
             if let Err(e) = tx.send(packet).await {
                 eprintln!("Failed to send packet: {e}");
                 break;
+            }
+        }
+    }
+
+    pub async fn close(self) {
+        for handle in self.handles.into_iter() {
+            if let Err(e) = handle.await {
+                eprintln!("Failed to wait for processor task: {e}");
             }
         }
     }
