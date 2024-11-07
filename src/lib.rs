@@ -37,16 +37,9 @@ impl TcpServerTask {
 }
 
 pub fn run_tcp_server(address: &str, port: u16) -> TcpServerTask {
-    let mut tcp_server = TcpServer::new(address, port);
-
-    let (tx, mut rx) = broadcast::channel(1);
-
-    let tcp_sever_task = tokio::spawn(async move {
-        tokio::select! {
-            _ = tcp_server.run() => (),
-            _ = rx.recv() => tcp_server.close().await,
-        }
-    });
+    let tcp_server = TcpServer::new(address, port);
+    let (tx, rx) = broadcast::channel(1);
+    let tcp_sever_task = tokio::spawn(tcp_server.run(rx));
 
     TcpServerTask {
         tcp_server_task: Some(tcp_sever_task),
