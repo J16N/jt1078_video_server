@@ -33,7 +33,7 @@ impl TcpClient {
     pub(crate) async fn send(&mut self) -> Result<()> {
         let mut reader = self.get_reader().await?;
         let writer = self.stream.as_mut().expect("Stream not found");
-        let mut buffer = [0; 1024];
+        let mut buffer = [0; 512 * 1024];
 
         let mut count = 0;
 
